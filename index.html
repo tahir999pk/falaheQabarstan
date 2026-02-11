@@ -11,50 +11,433 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Inter', sans-serif; }
     </style>
 </head>
-<body class="bg-slate-50">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // Accessing Lucide icons from the global window object
+        // Importing Lucide icons for the browser
         const { 
           Plus, LogOut, Trash2, Edit3, History, FileText, Eye, 
           Camera, Search, Calendar, ShieldCheck, Wallet, ArrowUpCircle, 
           ArrowDownCircle, X, Save, Phone, User, Lock, Unlock, CheckCircle, AlertCircle, FileSpreadsheet 
         } = lucide;
 
-        // --- PASTE YOUR FIREBASE CONFIG HERE ---
-        // Since you're running in a browser, replace __firebase_config with your actual config object
-        const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_PROJECT.firebaseapp.com",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT.appspot.com",
-            messagingSenderId: "YOUR_ID",
-            appId: "YOUR_APP_ID"
-        };
-        // ---------------------------------------
+        // PASTE THE REACT CODE YOU GAVE ME BELOW THIS LINE
+        // (I have pre-filled the start for you)
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { 
+  getFirestore, collection, addDoc, onSnapshot, updateDoc, 
+  deleteDoc, doc, serverTimestamp 
+} from 'firebase/firestore';
+import { 
+  Plus, LogOut, Trash2, Edit3, History, FileText, Eye, 
+  Camera, Search, Calendar, ShieldCheck, Wallet, ArrowUpCircle, 
+  ArrowDownCircle, X, Save, Phone, User, Lock, Unlock, CheckCircle, AlertCircle, FileSpreadsheet
+} from 'lucide-react';
 
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'falah-e-qubristan-v6';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState('user'); 
+  const [currentUserProfile, setCurrentUserProfile] = useState(null);
+  const [view, setView] = useState('records'); 
+  const [loginMode, setLoginMode] = useState(null); 
+  const [transactions, setTransactions] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [adminUsers, setAdminUsers] = useState([]);
+  
+  // Forms
+  const [phoneInput, setPhoneInput] = useState('');
+  const [passInput, setPassInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], detail: '', amount: '', type: 'income', image: '' });
+  const [editId, setEditId] = useState(null);
+  
+  // UI States
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  // Firebase Init & Auth
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsubscribe();
+  }, []);
+
+  // Data Sync
+  useEffect(() => {
+    if (!user) return;
+    
+    // Using correct paths as per Rule 1
+    const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
+    const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'audit_logs');
+    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'admin_users');
+
+    const unsubTrans = onSnapshot(transRef, (snap) => {
+      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.date) - new Date(a.date)));
+    }, (err) => console.error("Trans Sync Error:", err));
+
+    const unsubLogs = onSnapshot(logsRef, (snap) => {
+      setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.timestamp?.seconds - a.timestamp?.seconds));
+    }, (err) => console.error("Logs Sync Error:", err));
+
+    const unsubUsers = onSnapshot(usersRef, (snap) => {
+      setAdminUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Users Sync Error:", err));
+
+    return () => { unsubTrans(); unsubLogs(); unsubUsers(); };
+  }, [user]);
+
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    const foundAdmin = adminUsers.find(u => u.phone === phoneInput);
+    if (!foundAdmin) {
+      setError("Ye mobile number registered nahi hai.");
+      return;
+    }
+    if (foundAdmin.status === 'pending') {
+      setError("Account Approval Pending! Developer se rabta karein.");
+      return;
+    }
+    if (foundAdmin.status === 'locked') {
+      setError("Account Locked! Auditor se rabta karein.");
+      return;
+    }
+    if (foundAdmin.password === passInput) {
+      setRole('admin');
+      setCurrentUserProfile(foundAdmin);
+      setLoginMode(null);
+      setPassInput('');
+      setPhoneInput('');
+      setError('');
+    } else {
+      setError("Ghalat Password!");
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    if (!user) {
+      setError("System connect nahi hai. Please wait.");
+      return;
+    }
+
+    if (adminUsers.some(u => u.phone === phoneInput)) {
+      setError("Ye mobile number pehle se registered hai.");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Path: /artifacts/{appId}/public/data/admin_users
+      const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'admin_users');
+      await addDoc(usersRef, {
+        name: nameInput,
+        phone: phoneInput,
+        password: passInput,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+      
+      setSuccessMsg("Login Successfully created. Kindly Contact with Developer for Approval.");
+      setNameInput('');
+      setPhoneInput('');
+      setPassInput('');
+    } catch (err) { 
+      console.error("Reg Error:", err);
+      setError("Registration fail ho gayi: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAuditorLogin = (e) => {
+    e.preventDefault();
+    if (passInput === '39268') {
+      setRole('auditor');
+      setLoginMode(null);
+      setError('');
+      setPassInput('');
+    } else {
+      setError("Ghalat Auditor PIN!");
+    }
+  };
+
+  const handleSaveEntry = async (e) => {
+    e.preventDefault();
+    if (role !== 'admin' || !user) return;
+    setIsLoading(true);
+    try {
+      const payload = { 
+        ...formData, 
+        amount: Number(formData.amount), 
+        adminName: currentUserProfile.name,
+        timestamp: serverTimestamp() 
+      };
+      
+      const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
+      const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'audit_logs');
+
+      if (editId) {
+        const old = transactions.find(t => t.id === editId);
+        await addDoc(logsRef, { 
+          action: 'MODIFIED', oldData: old, newData: payload, admin: currentUserProfile.name, timestamp: serverTimestamp() 
+        });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editId), payload);
+      } else {
+        await addDoc(transRef, payload);
+      }
+      setIsModalOpen(false);
+      setEditId(null);
+      setFormData({ date: new Date().toISOString().split('T')[0], detail: '', amount: '', type: 'income', image: '' });
+    } catch (err) { console.error(err); } finally { setIsLoading(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (role !== 'admin' || !window.confirm("Khatam kar dein?") || !user) return;
+    const old = transactions.find(t => t.id === id);
+    const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'audit_logs');
+    await addDoc(logsRef, { 
+      action: 'DELETED', oldData: old, admin: currentUserProfile.name, timestamp: serverTimestamp() 
+    });
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
+  };
+
+  const changeUserStatus = async (admin, newStatus) => {
+    if (!user) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admin_users', admin.id), { status: newStatus });
+  };
+
+  const filteredData = useMemo(() => {
+    return transactions.filter(t => {
+      const matchesSearch = t.detail.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesFrom = dateFrom ? new Date(t.date) >= new Date(dateFrom) : true;
+      const matchesTo = dateTo ? new Date(t.date) <= new Date(dateTo) : true;
+      return matchesSearch && matchesFrom && matchesTo;
+    });
+  }, [transactions, searchTerm, dateFrom, dateTo]);
+
+  const stats = useMemo(() => {
+    const inc = filteredData.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+    const exp = filteredData.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
+    return { inc, exp, bal: inc - exp };
+  }, [filteredData]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-28">
+      {/* Header */}
+      <div className="bg-emerald-900 text-white p-6 rounded-b-[2.5rem] shadow-xl">
+        <div className="max-w-4xl mx-auto flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-500 p-2 rounded-xl"><Wallet size={24}/></div>
+            <div>
+              <h1 className="text-xl font-black">Falah-e-Qubristan</h1>
+              <p className="text-[10px] text-emerald-300 font-bold uppercase">Committee 227/228 RB</p>
+            </div>
+          </div>
+          {role === 'user' ? (
+            <div className="flex gap-2">
+              <button onClick={() => {setLoginMode('admin'); setSuccessMsg(''); setError('');}} className="text-[10px] font-black bg-white/10 px-4 py-2 rounded-lg border border-white/10">LOGIN</button>
+              <button onClick={() => {setLoginMode('auditor'); setSuccessMsg(''); setError('');}} className="text-[10px] font-black bg-emerald-600 px-4 py-2 rounded-lg">AUDITOR</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+               <div className="text-right">
+                <p className="text-[8px] opacity-60 uppercase font-black tracking-widest leading-none">Signed as</p>
+                <p className="text-[10px] font-black">{role === 'auditor' ? 'AUDITOR' : currentUserProfile?.name}</p>
+              </div>
+              <button onClick={() => {setRole('user'); setView('records');}} className="bg-red-500/20 p-2 rounded-xl border border-red-500/30"><LogOut size={16}/></button>
+            </div>
+          )}
+        </div>
+
+        <div className="max-w-4xl mx-auto grid grid-cols-3 gap-3">
+          <div className="bg-white/10 p-4 rounded-3xl backdrop-blur-md">
+            <p className="text-[9px] opacity-50 uppercase font-black">Aamad</p>
+            <p className="text-sm font-black">Rs {stats.inc.toLocaleString()}</p>
+          </div>
+          <div className="bg-white/10 p-4 rounded-3xl backdrop-blur-md">
+            <p className="text-[9px] opacity-50 uppercase font-black">Kharch</p>
+            <p className="text-sm font-black text-red-200">Rs {stats.exp.toLocaleString()}</p>
+          </div>
+          <div className="bg-emerald-500/20 p-4 rounded-3xl backdrop-blur-md border border-emerald-400/20">
+            <p className="text-[9px] opacity-50 uppercase font-black">Balance</p>
+            <p className="text-sm font-black text-emerald-300">Rs {stats.bal.toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+
+      <main className="max-w-4xl mx-auto px-4 -mt-6">
+        {/* Navigation Tabs */}
+        <div className="flex bg-white p-1 rounded-[1.5rem] shadow-lg border mb-6 sticky top-4 z-40">
+          <button onClick={() => setView('records')} className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black transition ${view === 'records' ? 'bg-emerald-800 text-white shadow-lg' : 'text-slate-400'}`}>RECORDS</button>
+          <button onClick={() => setView('reports')} className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black transition ${view === 'reports' ? 'bg-emerald-800 text-white shadow-lg' : 'text-slate-400'}`}>REPORTS</button>
+          {role === 'auditor' && (
+            <button onClick={() => setView('users')} className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black transition ${view === 'users' ? 'bg-emerald-800 text-white shadow-lg' : 'text-slate-400'}`}>APPROVALS</button>
+          )}
+          {(role === 'admin' || role === 'auditor') && (
+            <button onClick={() => setView('audit')} className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black transition ${view === 'audit' ? 'bg-emerald-800 text-white shadow-lg' : 'text-slate-400'}`}>LOGS</button>
+          )}
+        </div>
+
+        {view === 'records' && (
+          <div className="space-y-3">
+            <div className="bg-white p-4 rounded-3xl shadow-sm border flex items-center gap-3">
+              <Search className="text-slate-300" size={18}/>
+              <input type="text" placeholder="Records talash karein..." className="bg-transparent border-none outline-none text-sm w-full font-bold" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            </div>
+            {filteredData.length === 0 && <div className="text-center py-10 text-slate-400 text-sm font-black uppercase">No records found</div>}
+            {filteredData.map(t => (
+              <div key={t.id} className="bg-white p-5 rounded-[2rem] shadow-sm border flex items-center gap-4 group hover:border-emerald-200 transition">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${t.type === 'income' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
+                  {t.type === 'income' ? <ArrowUpCircle size={24}/> : <ArrowDownCircle size={24}/>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[9px] text-slate-400 font-black mb-1 uppercase flex gap-2">
+                    <span>{t.date}</span><span>|</span><span>{t.adminName}</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-800 truncate">{t.detail}</h4>
+                  {t.image && <button onClick={() => window.open(t.image)} className="text-[9px] text-emerald-600 font-black mt-2 bg-emerald-50 px-3 py-1 rounded-lg flex items-center gap-1.5 w-fit active:scale-95 transition"><Eye size={12}/> View Bill</button>}
+                </div>
+                <div className="text-right">
+                  <p className={`text-base font-black ${t.type === 'income' ? 'text-blue-700' : 'text-red-700'}`}>{Number(t.amount).toLocaleString()}</p>
+                  {role === 'admin' && (
+                    <div className="flex gap-2 mt-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => {setFormData(t); setEditId(t.id); setIsModalOpen(true);}} className="text-blue-500 p-1"><Edit3 size={14}/></button>
+                      <button onClick={() => handleDelete(t.id)} className="text-red-500 p-1"><Trash2 size={14}/></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === 'reports' && (
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-lg border space-y-6">
+            <h3 className="text-lg font-black text-emerald-900 uppercase tracking-widest">Report Center</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 ml-2 uppercase">From</label>
+                <input type="date" className="w-full bg-slate-50 border p-4 rounded-2xl text-sm font-bold" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 ml-2 uppercase">To</label>
+                <input type="date" className="w-full bg-slate-50 border p-4 rounded-2xl text-sm font-bold" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+              <button onClick={() => {
+                const csv = "Date,Detail,Type,Amount,Admin\n" + filteredData.map(t => `${t.date},${t.detail},${t.type},${t.amount},${t.adminName}`).join("\n");
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Falah_Report_${new Date().toLocaleDateString()}.csv`;
+                a.click();
+              }} className="bg-emerald-700 text-white p-5 rounded-[1.5rem] font-black flex items-center justify-center gap-2 shadow-xl active:scale-95 transition">
+                <FileSpreadsheet size={24}/> DOWNLOAD EXCEL
+              </button>
+              <button onClick={() => window.print()} className="bg-slate-800 text-white p-5 rounded-[1.5rem] font-black flex items-center justify-center gap-2 shadow-xl active:scale-95 transition">
+                <FileText size={24}/> PRINT PDF
+              </button>
+            </div>
+          </div>
+        )}
+
+        {view === 'users' && role === 'auditor' && (
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-lg border space-y-4">
+            <h3 className="text-lg font-black text-emerald-900 mb-4 uppercase">Admin Management</h3>
+            {adminUsers.length === 0 && <p className="text-center text-slate-400 py-6 text-xs font-black">No Admins Registered</p>}
+            {adminUsers.map(admin => (
+              <div key={admin.id} className="p-4 bg-slate-50 rounded-2xl border flex items-center justify-between border-slate-100">
+                <div>
+                  <h5 className="font-black text-sm">{admin.name}</h5>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold mt-0.5">
+                    <span>{admin.phone}</span>
+                    <span>•</span>
+                    <span className={`uppercase ${admin.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>Status: {admin.status}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {admin.status !== 'active' ? (
+                    <button onClick={() => changeUserStatus(admin, 'active')} className="bg-emerald-600 text-white p-3 rounded-xl shadow-lg flex items-center gap-1.5 text-[10px] font-black"><CheckCircle size={14}/> APPROVE</button>
+                  ) : (
+                    <button onClick={() => changeUserStatus(admin, 'locked')} className="bg-red-500 text-white p-3 rounded-xl shadow-lg flex items-center gap-1.5 text-[10px] font-black"><Lock size={14}/> LOCK</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === 'audit' && (
+          <div className="space-y-4">
+             <h3 className="text-lg font-black text-emerald-900 mb-2 uppercase px-2">History Logs</h3>
+            {auditLogs.map(log => (
+              <div key={log.id} className="bg-white p-5 rounded-[2rem] border-l-4 border-amber-500 shadow-sm border">
+                <div className="flex justify-between items-center mb-1">
+                   <span className="text-[10px] font-black uppercase text-amber-700 bg-amber-50 px-2 py-0.5 rounded">{log.action} BY {log.admin}</span>
+                   <span className="text-[9px] text-slate-400 font-bold">{log.timestamp?.toDate().toLocaleString()}</span>
+                </div>
+                <p className="text-xs text-slate-700 font-bold mt-1 leading-relaxed">
+                  {log.oldData.detail} (Rs {log.oldData.amount.toLocaleString()})
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Floating Plus Button */}
+      {role === 'admin' && (
+        <button onClick={() => {setEditId(null); setIsModalOpen(true);}} className="fixed bottom-28 right-6 w-16 h-16 bg-emerald-800 text-white rounded-[1.5rem] shadow-2xl flex items-center justify-center border-4 border-white z-50 active:scale-95 transition-transform">
+          <Plus size={32} />
+        </button>
+      )}
+
+      {/* Entry Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[
         const App = () => {
-            // Using React hooks from the global React object
             const [view, setView] = React.useState('records');
-            const [role, setRole] = React.useState('user');
-
-            // PLACE YOUR ENTIRE REACT LOGIC (from your first message) HERE
+            // ... rest of your state and logic here ...
             
             return (
-                <div className="min-h-screen pb-24">
-                   <div className="bg-emerald-900 text-white p-6 rounded-b-[2.5rem] shadow-xl">
-                        <div className="flex justify-between items-center">
-                            <h1 className="text-xl font-black">Falah-e-Qubristan</h1>
-                            <div className="bg-emerald-500 p-2 rounded-xl"><Wallet size={24}/></div>
-                        </div>
-                   </div>
-                   <div className="p-6 text-center text-slate-500 font-bold">
-                        App is connected to Vercel and ready for MIT App Inventor!
-                   </div>
+                <div className="min-h-screen bg-slate-50">
+                    <h1 className="p-10 text-center font-black text-emerald-900">
+                        APP LOADING SUCCESSFUL!
+                    </h1>
+                    <p className="text-center">If you see this, your Vercel link is working.</p>
                 </div>
             );
         };
